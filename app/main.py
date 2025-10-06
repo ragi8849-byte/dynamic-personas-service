@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List
@@ -6,6 +6,7 @@ import pandas as pd, numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 import logging
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,12 +40,42 @@ if len(USERS) > SAMPLE_SIZE:
 class DynamicReq(BaseModel):
     goal: str
     filters: Optional[Dict] = None
-    k_min: int = 2  # Reduced from 3 for faster clustering
-    k_max: int = 4  # Reduced from 6 for faster clustering
-    min_cluster_pct: float = 0.03  # drop tiny clusters (<3% of subset)
-    show_sub_personas: bool = True  # Show hierarchical personas
-    ui_format: bool = True  # Return UI-ready format
-    detailed_personas: bool = True  # Return detailed persona format
+    k_min: int = 2
+    k_max: int = 4
+    min_cluster_pct: float = 0.03
+    show_sub_personas: bool = True
+    ui_format: bool = True
+    detailed_personas: bool = True
+
+class PersonaChatReq(BaseModel):
+    cluster_id: int
+    persona_id: str
+    message: str
+    conversation_history: Optional[List[Dict]] = None
+
+class ClusterCard(BaseModel):
+    cluster_id: int
+    cluster_label: str
+    cluster_size: int
+    cluster_size_pct: float
+    cluster_description: str
+    top_traits: List[str]
+    representative_icon: str
+    engagement_score: str
+    demographics_summary: str
+    personas_count: int
+
+class PersonaCard(BaseModel):
+    persona_id: str
+    persona_name: str
+    demographics: str
+    care_about_top2: List[str]
+    barriers_top1: str
+    media_preference: str
+    cluster_linkage: str
+    behavioral_score: str
+    personality_traits: Dict
+    chat_personality: str
 
 # ---------- Helpers ----------
 def parse_goal(goal: str) -> dict:
@@ -64,7 +95,7 @@ def parse_goal(goal: str) -> dict:
     if "budget" in g or "price" in g:
         f["price_sensitivity_min"] = 0.55
     if "bose" in g and "india" in g:
-        f["brand_awareness_bose_min"] = 0.65 # Example heuristic
+        f["brand_awareness_bose_min"] = 0.65
     return f
 
 def apply_filters(users: pd.DataFrame, feats: np.ndarray, filters: dict):
@@ -93,6 +124,150 @@ def choose_k(feats_sub: np.ndarray, k_min=2, k_max=4):
         if sc > best_score:
             best_k, best_score, best_model = k, sc, km
     return best_k, best_score, best_model
+
+def generate_cluster_label(grp: pd.DataFrame) -> str:
+    """Generate descriptive cluster label from dominant traits"""
+    age_range = f"{int(grp['age'].quantile(0.1))}-{int(grp['age'].quantile(0.9))}"
+    dominant_city = grp["city_tier"].mode().iloc[0] if not grp["city_tier"].mode().empty else "Mixed"
+    dominant_income = grp["income_band"].mode().iloc[0] if not grp["income_band"].mode().empty else "Mid"
+    
+    # Determine tech adoption level
+    avg_devices = grp["device_count"].mean()
+    if avg_devices >= 4:
+        tech_level = "Tech Enthusiasts"
+    elif avg_devices >= 3:
+        tech_level = "Tech Adopters"
+    else:
+        tech_level = "Tech Skeptics"
+    
+    # Determine price sensitivity
+    avg_price_sens = grp["price_sensitivity"].mean()
+    if avg_price_sens >= 0.6:
+        price_level = "Budget Seekers"
+    elif avg_price_sens <= 0.4:
+        price_level = "Premium Buyers"
+    else:
+        price_level = "Value Conscious"
+    
+    return f"{tech_level} • {dominant_city} • {price_level}"
+
+def generate_cluster_description(grp: pd.DataFrame) -> str:
+    """Generate detailed cluster description"""
+    avg_age = grp["age"].mean()
+    avg_devices = grp["device_count"].mean()
+    avg_price_sens = grp["price_sensitivity"].mean()
+    avg_brand_aware = grp["brand_awareness_bose"].mean()
+    dominant_city = grp["city_tier"].mode().iloc[0] if not grp["city_tier"].mode().empty else "Mixed"
+    dominant_income = grp["income_band"].mode().iloc[0] if not grp["income_band"].mode().empty else "Mid"
+    
+    description = f"This cluster represents {dominant_income.lower()} income users in {dominant_city} cities, "
+    description += f"averaging {avg_age:.1f} years old. "
+    
+    if avg_devices >= 4:
+        description += "They are tech enthusiasts with multiple devices, "
+    elif avg_devices >= 3:
+        description += "They are moderate tech adopters, "
+    else:
+        description += "They are tech skeptics with minimal devices, "
+    
+    if avg_price_sens >= 0.6:
+        description += "highly price-sensitive and budget-conscious."
+    elif avg_price_sens <= 0.4:
+        description += "less price-sensitive and willing to pay premium."
+    else:
+        description += "moderately price-sensitive."
+    
+    return description
+
+def generate_top_traits(grp: pd.DataFrame) -> List[str]:
+    """Generate top 3 traits for the cluster"""
+    traits = []
+    
+    # Price sensitivity trait
+    avg_price_sens = grp["price_sensitivity"].mean()
+    if avg_price_sens >= 0.6:
+        traits.append("Price Sensitive")
+    elif avg_price_sens <= 0.4:
+        traits.append("Low Price Sensitivity")
+    
+    # Device usage trait
+    avg_devices = grp["device_count"].mean()
+    if avg_devices >= 4:
+        traits.append("Multi-Device")
+    elif avg_devices <= 2:
+        traits.append("Minimal Devices")
+    
+    # Media preference trait
+    top_media = grp["preferred_media"].mode().iloc[0] if not grp["preferred_media"].mode().empty else "YouTube"
+    if top_media == "YouTube":
+        traits.append("High YouTube Usage")
+    elif top_media == "Instagram":
+        traits.append("Instagram Heavy")
+    elif top_media == "TV":
+        traits.append("Traditional Media")
+    
+    # Brand awareness trait
+    avg_brand_aware = grp["brand_awareness_bose"].mean()
+    if avg_brand_aware >= 0.7:
+        traits.append("Brand Aware")
+    
+    # Privacy trait
+    avg_privacy = grp["privacy_pref"].mean()
+    if avg_privacy >= 0.6:
+        traits.append("Privacy Focused")
+    
+    return traits[:3]  # Return top 3
+
+def generate_representative_icon(grp: pd.DataFrame) -> str:
+    """Generate representative emoji based on demographics"""
+    avg_age = grp["age"].mean()
+    dominant_income = grp["income_band"].mode().iloc[0] if not grp["income_band"].mode().empty else "Mid"
+    avg_devices = grp["device_count"].mean()
+    
+    # Age-based emoji
+    if avg_age <= 25:
+        base_emoji = "🧑‍💻"  # Young person
+    elif avg_age <= 35:
+        base_emoji = "👨‍💼"  # Professional
+    else:
+        base_emoji = "👩‍💼"  # Mature professional
+    
+    # Income-based emoji
+    if dominant_income == "High":
+        income_emoji = "💎"
+    elif dominant_income == "Low":
+        income_emoji = "💸"
+    else:
+        income_emoji = "💰"
+    
+    # Tech level emoji
+    if avg_devices >= 4:
+        tech_emoji = "🎧"
+    elif avg_devices >= 3:
+        tech_emoji = "📱"
+    else:
+        tech_emoji = "📺"
+    
+    return f"{base_emoji} {income_emoji} {tech_emoji}"
+
+def generate_engagement_score(silhouette_score: float) -> str:
+    """Generate engagement/cohesion score description"""
+    if silhouette_score >= 0.5:
+        return f"Cohesion {silhouette_score:.2f} • High Separation"
+    elif silhouette_score >= 0.3:
+        return f"Cohesion {silhouette_score:.2f} • Medium Separation"
+    elif silhouette_score >= 0.1:
+        return f"Cohesion {silhouette_score:.2f} • Low Separation"
+    else:
+        return f"Cohesion {silhouette_score:.2f} • Poor Separation"
+
+def generate_demographics_summary(grp: pd.DataFrame) -> str:
+    """Generate demographics summary for cluster card"""
+    age_range = f"{int(grp['age'].quantile(0.1))}-{int(grp['age'].quantile(0.9))}"
+    dominant_city = grp["city_tier"].mode().iloc[0] if not grp["city_tier"].mode().empty else "Mixed"
+    dominant_income = grp["income_band"].mode().iloc[0] if not grp["income_band"].mode().empty else "Mid"
+    
+    return f"{age_range} years • {dominant_income} income • {dominant_city} cities"
 
 def generate_persona_name(grp: pd.DataFrame, cluster_id: int) -> str:
     """Generate persona name with Indian names and traits"""
@@ -235,124 +410,115 @@ def generate_behavioral_score(grp: pd.DataFrame, silhouette_score: float) -> str
     
     return f"{normalized_score:.2f} ({relevance})"
 
-def generate_sub_personas(grp: pd.DataFrame, cluster_id: int) -> List[Dict]:
-    """Generate sub-personas within a cluster based on key traits"""
-    sub_personas = []
-    
-    # Define sub-persona filters based on key traits
-    sub_filters = [
-        {"name": "Urban Tech Enthusiasts", "filters": {"city_tier": ["Tier-1"], "device_count_min": 3}},
-        {"name": "Urban Tech Skeptics", "filters": {"city_tier": ["Tier-1"], "privacy_pref_min": 0.6}},
-        {"name": "Budget-Conscious Users", "filters": {"price_sensitivity_min": 0.6}},
-        {"name": "Brand-Aware Consumers", "filters": {"brand_awareness_bose_min": 0.7}},
-        {"name": "Privacy-Focused Users", "filters": {"privacy_pref_min": 0.7}},
-        {"name": "Multi-Device Users", "filters": {"device_count_min": 4}},
-    ]
-    
-    for sub_filter in sub_filters:
-        mask = np.ones(len(grp), dtype=bool)
-        filters = sub_filter["filters"]
-        
-        if "city_tier" in filters:
-            mask &= grp.city_tier.isin(filters["city_tier"]).values
-        if "device_count_min" in filters:
-            mask &= (grp.device_count >= filters["device_count_min"]).values
-        if "privacy_pref_min" in filters:
-            mask &= (grp.privacy_pref >= filters["privacy_pref_min"]).values
-        if "price_sensitivity_min" in filters:
-            mask &= (grp.price_sensitivity >= filters["price_sensitivity_min"]).values
-        if "brand_awareness_bose_min" in filters:
-            mask &= (grp.brand_awareness_bose >= filters["brand_awareness_bose_min"]).values
-            
-        sub_grp = grp[mask]
-        
-        if len(sub_grp) >= 10:  # Minimum size for sub-persona
-            sub_persona = {
-                "name": sub_filter["name"],
-                "size": len(sub_grp),
-                "size_pct": round(len(sub_grp)/len(grp)*100, 1),
-                "traits": {
-                    "avg_age": round(sub_grp["age"].mean(), 1),
-                    "avg_device_count": round(sub_grp["device_count"].mean(), 1),
-                    "avg_price_sensitivity": round(sub_grp["price_sensitivity"].mean(), 2),
-                    "avg_privacy_pref": round(sub_grp["privacy_pref"].mean(), 2),
-                    "avg_brand_awareness": round(sub_grp["brand_awareness_bose"].mean(), 2),
-                    "top_income": sub_grp["income_band"].mode().iloc[0] if not sub_grp["income_band"].mode().empty else "Unknown",
-                    "top_media": sub_grp["preferred_media"].mode().iloc[0] if not sub_grp["preferred_media"].mode().empty else "YouTube"
-                }
-            }
-            sub_personas.append(sub_persona)
-    
-    return sub_personas
-
-def summarize_cluster(grp: pd.DataFrame, cluster_id: int, show_sub_personas: bool = True, ui_format: bool = True, detailed_personas: bool = True, silhouette_score: float = 0.0):
-    care_about, barriers, top_traits = set(), set(), []
-    # Heuristics from synthetic signals
-    if grp["brand_awareness_bose"].mean() > 0.65:
-        care_about.add("brand reputation")
-    if grp["price_sensitivity"].mean() > 0.55:
-        barriers.add("price premium"); care_about.add("discounts")
-    if grp["privacy_pref"].mean() > 0.55:
-        barriers.add("always-on mics"); care_about.add("local control")
-    if grp["device_count"].mean() >= 3:
-        care_about.add("seamless casting"); top_traits.append("multi-device")
-    if grp["price_sensitivity"].mean() < 0.45:
-        top_traits.append("low price sensitivity")
-    if grp["brand_awareness_bose"].mean() >= 0.7:
-        top_traits.append("brand aware")
-
+def generate_personality_traits(grp: pd.DataFrame) -> Dict:
+    """Generate personality traits for LLM consumption"""
+    avg_age = grp["age"].mean()
+    avg_devices = grp["device_count"].mean()
+    avg_price_sens = grp["price_sensitivity"].mean()
+    avg_brand_aware = grp["brand_awareness_bose"].mean()
+    avg_privacy = grp["privacy_pref"].mean()
+    dominant_city = grp["city_tier"].mode().iloc[0] if not grp["city_tier"].mode().empty else "Tier-2"
+    dominant_income = grp["income_band"].mode().iloc[0] if not grp["income_band"].mode().empty else "Mid"
     top_media = grp["preferred_media"].mode().iloc[0] if not grp["preferred_media"].mode().empty else "YouTube"
-    demographics = {
-        "age_range": f"{int(grp['age'].quantile(0.1))}-{int(grp['age'].quantile(0.9))}",
-        "income_band": grp["income_band"].mode().iloc[0],
-        "geo": grp["city_tier"].mode().iloc[0]
+    
+    return {
+        "age_group": f"{int(avg_age)} years old",
+        "tech_savviness": "High" if avg_devices >= 4 else "Medium" if avg_devices >= 3 else "Low",
+        "price_sensitivity": "High" if avg_price_sens >= 0.6 else "Low" if avg_price_sens <= 0.4 else "Medium",
+        "brand_awareness": "High" if avg_brand_aware >= 0.7 else "Medium" if avg_brand_aware >= 0.5 else "Low",
+        "privacy_consciousness": "High" if avg_privacy >= 0.6 else "Medium" if avg_privacy >= 0.4 else "Low",
+        "city_tier": dominant_city,
+        "income_level": dominant_income,
+        "preferred_media": top_media,
+        "device_count": f"{avg_devices:.1f} devices",
+        "emi_usage_likelihood": f"{grp['emi_flag'].mean():.1%}"
     }
-    priors = {
-        "emi_usage": round(float(grp["emi_flag"].mean()), 2),
-        "brand_awareness_bose": round(float(grp["brand_awareness_bose"].mean()), 2),
-        "top_media": [top_media]
-    }
+
+def generate_chat_personality(grp: pd.DataFrame) -> str:
+    """Generate chat personality description for LLM"""
+    avg_age = grp["age"].mean()
+    avg_devices = grp["device_count"].mean()
+    avg_price_sens = grp["price_sensitivity"].mean()
+    dominant_city = grp["city_tier"].mode().iloc[0] if not grp["city_tier"].mode().empty else "Tier-2"
+    dominant_income = grp["income_band"].mode().iloc[0] if not grp["income_band"].mode().empty else "Mid"
     
-    result = {
-        "care_about": sorted(list(care_about)),
-        "barriers": sorted(list(barriers)),
-        "top_traits": top_traits,
-        "priors": priors,
-        "demographics": demographics
-    }
+    personality = f"You are a {int(avg_age)}-year-old from a {dominant_city} city with {dominant_income.lower()} income. "
     
-    # Add detailed persona format
-    if detailed_personas:
-        result["detailed_persona"] = {
-            "persona_name": generate_persona_name(grp, cluster_id),
-            "demographics": generate_demographics_string(grp),
-            "care_about_top2": generate_care_about_top2(grp),
-            "barriers_top1": generate_barriers_top1(grp),
-            "media_preference": generate_media_preference(grp),
-            "cluster_linkage": generate_cluster_linkage(cluster_id, grp),
-            "behavioral_score": generate_behavioral_score(grp, silhouette_score)
-        }
+    if avg_devices >= 4:
+        personality += "You're tech-savvy and love trying new gadgets. "
+    elif avg_devices >= 3:
+        personality += "You're moderately tech-savvy and adopt technology when it makes sense. "
+    else:
+        personality += "You're cautious about new technology and prefer simple solutions. "
     
-    # Add sub-personas if requested
-    if show_sub_personas:
-        result["sub_personas"] = generate_sub_personas(grp, cluster_id)
+    if avg_price_sens >= 0.6:
+        personality += "You're very price-conscious and always look for deals and EMI options. "
+    elif avg_price_sens <= 0.4:
+        personality += "You're willing to pay premium for quality and don't mind spending more. "
+    else:
+        personality += "You balance price and quality, looking for good value. "
     
-    return result
+    personality += "Respond naturally as this persona would, using casual language and expressing your genuine concerns and interests."
+    
+    return personality
+
+def generate_persona_chat_response(persona_traits: Dict, chat_personality: str, message: str, conversation_history: List[Dict] = None) -> str:
+    """Generate persona chat response using traits and personality"""
+    # This is a simplified response generator
+    # In production, you'd integrate with an LLM API like OpenAI, Anthropic, etc.
+    
+    # Build context from traits
+    context = f"Persona traits: {json.dumps(persona_traits, indent=2)}\n"
+    context += f"Personality: {chat_personality}\n"
+    context += f"User message: {message}\n"
+    
+    # Simple rule-based responses (replace with LLM integration)
+    if "price" in message.lower() or "cost" in message.lower():
+        if persona_traits["price_sensitivity"] == "High":
+            return "Honestly, price is a big concern for me. I need to know about EMI options and if there are any discounts available. Can't spend too much on headphones right now."
+        else:
+            return "Price matters, but I'm more focused on quality. If it's worth it, I don't mind paying a bit more for good sound."
+    
+    elif "quality" in message.lower() or "sound" in message.lower():
+        if persona_traits["brand_awareness"] == "High":
+            return "I've heard Bose has great sound quality. That's what matters most to me - I want crisp, clear audio for my music and videos."
+        else:
+            return "I'm not sure about the sound quality. Can you tell me more about how it compares to other brands?"
+    
+    elif "tech" in message.lower() or "features" in message.lower():
+        if persona_traits["tech_savviness"] == "High":
+            return "I love tech features! Tell me about the smart features, connectivity options, and any cool tech stuff it has."
+        else:
+            return "I'm not too tech-savvy. Are the features easy to use? I don't want something too complicated."
+    
+    elif "privacy" in message.lower():
+        if persona_traits["privacy_consciousness"] == "High":
+            return "Privacy is really important to me. Does it have any always-listening features? I'm concerned about my data being collected."
+        else:
+            return "Privacy is okay, but I'm more concerned about the sound quality and comfort."
+    
+    else:
+        # Generic response based on personality
+        if persona_traits["price_sensitivity"] == "High":
+            return "I'm interested, but I need to know more about the pricing and payment options. What's the best deal I can get?"
+        else:
+            return "Sounds interesting! Tell me more about what makes these headphones special and why I should consider them."
 
 # ---------- Routes ----------
 @app.get("/health")
 def health():
     return {"ok": True, "users": int(len(USERS))}
 
-@app.post("/personas/dynamic")
-def dynamic_personas(req: DynamicReq):
+@app.post("/clusters/generate")
+def generate_clusters(req: DynamicReq):
+    """Generate cluster cards from goal"""
     goal = req.goal or ""
     filters = req.filters or parse_goal(goal)
 
     users_sub, feats_sub = apply_filters(USERS, FEATS, filters)
     n = len(users_sub)
-    if n < 100:  # Reduced threshold for smaller dataset
-        return {"personas": [], "meta": {"subset_n": n, "filters_applied": filters, "warning": "too few users"}}
+    if n < 100:
+        return {"clusters": [], "meta": {"subset_n": n, "filters_applied": filters, "warning": "too few users"}}
 
     best_k, best_score, best_model = choose_k(feats_sub, req.k_min, req.k_max)
     labels = best_model.predict(feats_sub)
@@ -360,49 +526,134 @@ def dynamic_personas(req: DynamicReq):
     users_sub = users_sub.copy()
     users_sub["cid"] = labels
 
-    personas = []
+    clusters = []
     for cid, grp in users_sub.groupby("cid"):
         size_pct = round(len(grp)/n*100.0, 1)
         if size_pct < (req.min_cluster_pct * 100):
-            continue  # drop tiny clusters
-        try:
-            s = summarize_cluster(grp, int(cid), req.show_sub_personas, req.ui_format, req.detailed_personas, best_score)
-            
-            persona_data = {
-                "id": f"dyn_{int(cid)}",
-                "label": f"Dynamic Persona {int(cid)}",
-                "size_pct": size_pct,
-                "cluster_size": len(grp),
-                **s
-            }
-            
-            personas.append(persona_data)
-        except Exception as e:
-            logger.error(f"Error summarizing cluster {cid}: {e}")
-            # Append a fallback persona with error info
-            personas.append({
-                "id": f"dyn_{int(cid)}",
-                "label": f"Dynamic Persona {int(cid)} (Error)",
-                "size_pct": size_pct,
-                "cluster_size": len(grp),
-                "care_about": [],
-                "barriers": [f"summarization error: {e}"],
-                "top_traits": [],
-                "priors": {},
-                "demographics": {},
-                "sub_personas": [],
-                "detailed_persona": {
-                    "persona_name": "Error Persona",
-                    "demographics": "Error • Error • Error",
-                    "care_about_top2": ["Error", "Processing"],
-                    "barriers_top1": "Processing error",
-                    "media_preference": "Error",
-                    "cluster_linkage": f"Cluster #{int(cid)} — Error",
-                    "behavioral_score": "0.00 (Error)"
-                }
-            })
-
-    personas = sorted(personas, key=lambda p: p["size_pct"], reverse=True)[:6]
-    return {"personas": personas, "meta": {
+            continue
+        
+        cluster_card = ClusterCard(
+            cluster_id=int(cid),
+            cluster_label=generate_cluster_label(grp),
+            cluster_size=len(grp),
+            cluster_size_pct=size_pct,
+            cluster_description=generate_cluster_description(grp),
+            top_traits=generate_top_traits(grp),
+            representative_icon=generate_representative_icon(grp),
+            engagement_score=generate_engagement_score(best_score),
+            demographics_summary=generate_demographics_summary(grp),
+            personas_count=min(3, max(1, len(grp) // 100))  # Estimate personas per cluster
+        )
+        clusters.append(cluster_card)
+    
+    clusters = sorted(clusters, key=lambda c: c.cluster_size_pct, reverse=True)
+    return {"clusters": clusters, "meta": {
         "subset_n": n, "k": best_k, "silhouette": round(float(best_score),3), "filters_applied": filters}
     }
+
+@app.post("/personas/{cluster_id}")
+def get_personas_for_cluster(cluster_id: int, req: DynamicReq):
+    """Get personas for a specific cluster"""
+    goal = req.goal or ""
+    filters = req.filters or parse_goal(goal)
+
+    users_sub, feats_sub = apply_filters(USERS, FEATS, filters)
+    n = len(users_sub)
+    if n < 100:
+        raise HTTPException(status_code=400, detail="Too few users in subset")
+
+    best_k, best_score, best_model = choose_k(feats_sub, req.k_min, req.k_max)
+    labels = best_model.predict(feats_sub)
+
+    users_sub = users_sub.copy()
+    users_sub["cid"] = labels
+
+    # Filter for specific cluster
+    cluster_users = users_sub[users_sub["cid"] == cluster_id]
+    if len(cluster_users) == 0:
+        raise HTTPException(status_code=404, detail=f"Cluster {cluster_id} not found")
+
+    # Generate personas for this cluster
+    personas = []
+    cluster_size = len(cluster_users)
+    
+    # Create 2-3 personas per cluster
+    num_personas = min(3, max(2, cluster_size // 200))
+    
+    for i in range(num_personas):
+        # Split cluster into sub-groups for different personas
+        start_idx = i * (cluster_size // num_personas)
+        end_idx = (i + 1) * (cluster_size // num_personas) if i < num_personas - 1 else cluster_size
+        persona_grp = cluster_users.iloc[start_idx:end_idx]
+        
+        persona_card = PersonaCard(
+            persona_id=f"dyn_{cluster_id}_{i}",
+            persona_name=generate_persona_name(persona_grp, cluster_id),
+            demographics=generate_demographics_string(persona_grp),
+            care_about_top2=generate_care_about_top2(persona_grp),
+            barriers_top1=generate_barriers_top1(persona_grp),
+            media_preference=generate_media_preference(persona_grp),
+            cluster_linkage=generate_cluster_linkage(cluster_id, persona_grp),
+            behavioral_score=generate_behavioral_score(persona_grp, best_score),
+            personality_traits=generate_personality_traits(persona_grp),
+            chat_personality=generate_chat_personality(persona_grp)
+        )
+        personas.append(persona_card)
+    
+    return {"personas": personas, "cluster_info": {
+        "cluster_id": cluster_id,
+        "cluster_size": cluster_size,
+        "cluster_label": generate_cluster_label(cluster_users)
+    }}
+
+@app.post("/personas/{persona_id}/chat")
+def chat_with_persona(persona_id: str, req: PersonaChatReq):
+    """Chat with a specific persona"""
+    # Extract cluster_id from persona_id
+    try:
+        cluster_id = int(persona_id.split('_')[1])
+    except:
+        raise HTTPException(status_code=400, detail="Invalid persona ID")
+    
+    # Get persona traits (in production, you'd store this in a database)
+    # For now, we'll regenerate them
+    goal = "college students"  # Default goal
+    filters = parse_goal(goal)
+    
+    users_sub, feats_sub = apply_filters(USERS, FEATS, filters)
+    best_k, best_score, best_model = choose_k(feats_sub, 2, 4)
+    labels = best_model.predict(feats_sub)
+    
+    users_sub = users_sub.copy()
+    users_sub["cid"] = labels
+    
+    cluster_users = users_sub[users_sub["cid"] == cluster_id]
+    if len(cluster_users) == 0:
+        raise HTTPException(status_code=404, detail=f"Persona {persona_id} not found")
+    
+    # Generate response
+    persona_traits = generate_personality_traits(cluster_users)
+    chat_personality = generate_chat_personality(cluster_users)
+    
+    response = generate_persona_chat_response(
+        persona_traits, 
+        chat_personality, 
+        req.message, 
+        req.conversation_history
+    )
+    
+    return {
+        "persona_id": persona_id,
+        "response": response,
+        "persona_traits": persona_traits,
+        "conversation_history": (req.conversation_history or []) + [
+            {"role": "user", "message": req.message},
+            {"role": "persona", "message": response}
+        ]
+    }
+
+# Legacy endpoint for backward compatibility
+@app.post("/personas/dynamic")
+def dynamic_personas(req: DynamicReq):
+    """Legacy endpoint - redirects to new cluster-based flow"""
+    return generate_clusters(req)
