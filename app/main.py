@@ -20,14 +20,21 @@ app.add_middleware(
 
 # ---------- Load data created in Step 1 ----------
 USERS = pd.read_parquet("data/users.parquet")
+# OPTIMIZATION: Use smaller sample for faster API responses
+SAMPLE_SIZE = 5000  # Much faster than 50K
+if len(USERS) > SAMPLE_SIZE:
+    print(f"Using sample of {SAMPLE_SIZE} users for faster API responses")
+    sample_indices = np.random.choice(len(USERS), SAMPLE_SIZE, replace=False)
+    USERS = USERS.iloc[sample_indices].reset_index(drop=True)
+    FEATS = FEATS[sample_indices]
 FEATS = np.load("data/feats.npy")  # standardized feature matrix aligned to USERS rows
 
 # ---------- Models ----------
 class DynamicReq(BaseModel):
     goal: str
     filters: Optional[Dict] = None
-    k_min: int = 3
-    k_max: int = 6
+    k_min: int = 2
+    k_max: int = 4
     min_cluster_pct: float = 0.03  # drop tiny clusters (<3% of subset)
 
 # ---------- Helpers ----------
