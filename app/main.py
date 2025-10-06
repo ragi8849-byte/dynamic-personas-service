@@ -43,6 +43,8 @@ class DynamicReq(BaseModel):
     k_max: int = 4  # Reduced from 6 for faster clustering
     min_cluster_pct: float = 0.03  # drop tiny clusters (<3% of subset)
     show_sub_personas: bool = True  # Show hierarchical personas
+    ui_format: bool = True  # Return UI-ready format
+    detailed_personas: bool = True  # Return detailed persona format
 
 # ---------- Helpers ----------
 def parse_goal(goal: str) -> dict:
@@ -91,6 +93,147 @@ def choose_k(feats_sub: np.ndarray, k_min=2, k_max=4):
         if sc > best_score:
             best_k, best_score, best_model = k, sc, km
     return best_k, best_score, best_model
+
+def generate_persona_name(grp: pd.DataFrame, cluster_id: int) -> str:
+    """Generate persona name with Indian names and traits"""
+    # Indian names based on demographics
+    names = {
+        "Tier-1": ["Aarav", "Priya", "Rohan", "Kavya", "Arjun", "Ananya"],
+        "Tier-2": ["Vikram", "Sneha", "Rajesh", "Pooja", "Suresh", "Meera"],
+        "Tier-3": ["Manoj", "Sunita", "Kumar", "Lakshmi", "Ravi", "Geeta"]
+    }
+    
+    surnames = ["Sharma", "Patel", "Singh", "Kumar", "Gupta", "Verma", "Jain", "Agarwal"]
+    
+    dominant_city = grp["city_tier"].mode().iloc[0] if not grp["city_tier"].mode().empty else "Tier-2"
+    dominant_income = grp["income_band"].mode().iloc[0] if not grp["income_band"].mode().empty else "Mid"
+    
+    # Select name based on city tier
+    first_name = names[dominant_city][cluster_id % len(names[dominant_city])]
+    surname = surnames[cluster_id % len(surnames)]
+    
+    # Add trait descriptor
+    avg_price_sens = grp["price_sensitivity"].mean()
+    avg_devices = grp["device_count"].mean()
+    
+    if avg_price_sens >= 0.6:
+        trait = "Budget Seeker"
+    elif avg_devices >= 4:
+        trait = "Tech Enthusiast"
+    elif avg_devices <= 2:
+        trait = "Tech Skeptic"
+    else:
+        trait = "Tech Adopter"
+    
+    return f"{first_name} {surname} — Young {trait}"
+
+def generate_demographics_string(grp: pd.DataFrame) -> str:
+    """Generate demographics string in the specified format"""
+    age_range = f"{int(grp['age'].quantile(0.1))}-{int(grp['age'].quantile(0.9))}"
+    dominant_income = grp["income_band"].mode().iloc[0] if not grp["income_band"].mode().empty else "Mid"
+    dominant_city = grp["city_tier"].mode().iloc[0] if not grp["city_tier"].mode().empty else "Tier-2"
+    
+    # Map income to salary ranges
+    income_map = {
+        "Low": "₹15-25K",
+        "Mid": "₹25-50K", 
+        "High": "₹50-100K"
+    }
+    
+    city_map = {
+        "Tier-1": "Tier 1 city",
+        "Tier-2": "Tier 2 city",
+        "Tier-3": "Tier 3 city"
+    }
+    
+    return f"{age_range} • {income_map.get(dominant_income, '₹25-50K')} • {city_map.get(dominant_city, 'Tier 2 city')}"
+
+def generate_care_about_top2(grp: pd.DataFrame) -> List[str]:
+    """Generate top 2 care about items"""
+    care_items = []
+    
+    # Price sensitivity care
+    avg_price_sens = grp["price_sensitivity"].mean()
+    if avg_price_sens >= 0.6:
+        care_items.append("Affordable EMI options")
+    
+    # Brand awareness care
+    avg_brand_aware = grp["brand_awareness_bose"].mean()
+    if avg_brand_aware >= 0.6:
+        care_items.append("Trusted reviews")
+    
+    # Device usage care
+    avg_devices = grp["device_count"].mean()
+    if avg_devices >= 3:
+        care_items.append("Seamless device integration")
+    
+    # Privacy care
+    avg_privacy = grp["privacy_pref"].mean()
+    if avg_privacy >= 0.6:
+        care_items.append("Privacy protection")
+    
+    # Media preference care
+    top_media = grp["preferred_media"].mode().iloc[0] if not grp["preferred_media"].mode().empty else "YouTube"
+    if top_media == "YouTube":
+        care_items.append("Video content quality")
+    elif top_media == "Instagram":
+        care_items.append("Social media integration")
+    
+    return care_items[:2]  # Return top 2
+
+def generate_barriers_top1(grp: pd.DataFrame) -> str:
+    """Generate top 1 barrier"""
+    avg_price_sens = grp["price_sensitivity"].mean()
+    avg_brand_aware = grp["brand_awareness_bose"].mean()
+    avg_privacy = grp["privacy_pref"].mean()
+    
+    if avg_price_sens >= 0.6:
+        return "Perceived overpricing of Bose"
+    elif avg_brand_aware <= 0.4:
+        return "Low brand awareness"
+    elif avg_privacy >= 0.6:
+        return "Privacy concerns with smart features"
+    else:
+        return "Uncertainty about product quality"
+
+def generate_media_preference(grp: pd.DataFrame) -> str:
+    """Generate media preference string"""
+    top_media = grp["preferred_media"].mode().iloc[0] if not grp["preferred_media"].mode().empty else "YouTube"
+    
+    # Get secondary media preference
+    media_counts = grp["preferred_media"].value_counts()
+    if len(media_counts) > 1:
+        secondary_media = media_counts.index[1]
+        return f"{top_media}, {secondary_media}"
+    else:
+        return top_media
+
+def generate_cluster_linkage(cluster_id: int, grp: pd.DataFrame) -> str:
+    """Generate cluster linkage description"""
+    avg_devices = grp["device_count"].mean()
+    
+    if avg_devices >= 4:
+        cluster_type = "Tech Enthusiasts"
+    elif avg_devices >= 3:
+        cluster_type = "Tech Adopters"
+    else:
+        cluster_type = "Tech Skeptics"
+    
+    return f"Cluster #{cluster_id} — {cluster_type}"
+
+def generate_behavioral_score(grp: pd.DataFrame, silhouette_score: float) -> str:
+    """Generate behavioral score based on cluster cohesion"""
+    # Normalize silhouette score to 0-1 range
+    normalized_score = max(0, min(1, (silhouette_score + 1) / 2))
+    
+    if normalized_score >= 0.8:
+        relevance = "High relevance"
+    elif normalized_score >= 0.6:
+        relevance = "Medium relevance"
+    else:
+        relevance = "Low relevance"
+    
+    return f"{normalized_score:.2f} ({relevance})"
 
 def generate_sub_personas(grp: pd.DataFrame, cluster_id: int) -> List[Dict]:
     """Generate sub-personas within a cluster based on key traits"""
@@ -142,7 +285,7 @@ def generate_sub_personas(grp: pd.DataFrame, cluster_id: int) -> List[Dict]:
     
     return sub_personas
 
-def summarize_cluster(grp: pd.DataFrame, show_sub_personas: bool = True):
+def summarize_cluster(grp: pd.DataFrame, cluster_id: int, show_sub_personas: bool = True, ui_format: bool = True, detailed_personas: bool = True, silhouette_score: float = 0.0):
     care_about, barriers, top_traits = set(), set(), []
     # Heuristics from synthetic signals
     if grp["brand_awareness_bose"].mean() > 0.65:
@@ -178,9 +321,21 @@ def summarize_cluster(grp: pd.DataFrame, show_sub_personas: bool = True):
         "demographics": demographics
     }
     
+    # Add detailed persona format
+    if detailed_personas:
+        result["detailed_persona"] = {
+            "persona_name": generate_persona_name(grp, cluster_id),
+            "demographics": generate_demographics_string(grp),
+            "care_about_top2": generate_care_about_top2(grp),
+            "barriers_top1": generate_barriers_top1(grp),
+            "media_preference": generate_media_preference(grp),
+            "cluster_linkage": generate_cluster_linkage(cluster_id, grp),
+            "behavioral_score": generate_behavioral_score(grp, silhouette_score)
+        }
+    
     # Add sub-personas if requested
     if show_sub_personas:
-        result["sub_personas"] = generate_sub_personas(grp, 0)  # cluster_id will be set later
+        result["sub_personas"] = generate_sub_personas(grp, cluster_id)
     
     return result
 
@@ -211,19 +366,17 @@ def dynamic_personas(req: DynamicReq):
         if size_pct < (req.min_cluster_pct * 100):
             continue  # drop tiny clusters
         try:
-            s = summarize_cluster(grp, req.show_sub_personas)
-            # Update sub-personas with correct cluster_id
-            if req.show_sub_personas and "sub_personas" in s:
-                for sub_persona in s["sub_personas"]:
-                    sub_persona["cluster_id"] = int(cid)
+            s = summarize_cluster(grp, int(cid), req.show_sub_personas, req.ui_format, req.detailed_personas, best_score)
             
-            personas.append({
+            persona_data = {
                 "id": f"dyn_{int(cid)}",
                 "label": f"Dynamic Persona {int(cid)}",
                 "size_pct": size_pct,
                 "cluster_size": len(grp),
                 **s
-            })
+            }
+            
+            personas.append(persona_data)
         except Exception as e:
             logger.error(f"Error summarizing cluster {cid}: {e}")
             # Append a fallback persona with error info
@@ -237,7 +390,16 @@ def dynamic_personas(req: DynamicReq):
                 "top_traits": [],
                 "priors": {},
                 "demographics": {},
-                "sub_personas": []
+                "sub_personas": [],
+                "detailed_persona": {
+                    "persona_name": "Error Persona",
+                    "demographics": "Error • Error • Error",
+                    "care_about_top2": ["Error", "Processing"],
+                    "barriers_top1": "Processing error",
+                    "media_preference": "Error",
+                    "cluster_linkage": f"Cluster #{int(cid)} — Error",
+                    "behavioral_score": "0.00 (Error)"
+                }
             })
 
     personas = sorted(personas, key=lambda p: p["size_pct"], reverse=True)[:6]
