@@ -1,0 +1,6 @@
+id,label,size_pct,age_range,income_band,geo,brand_awareness_bose,emi_usage,top_media,care_about,barriers,top_traits
+dyn_4,Dynamic Persona 4,23.6,18-25,Mid,Tier-2,0.58,0.46,YouTube,seamless casting,,multi-device
+dyn_2,Dynamic Persona 2,21.5,18-25,Mid,Tier-2,0.61,0.42,Instagram,seamless casting,,multi-device
+dyn_0,Dynamic Persona 0,20.1,18-25,Mid,Tier-2,0.59,0.45,TV,seamless casting,,multi-device
+dyn_1,Dynamic Persona 1,19.0,18-25,Low,Tier-2,0.61,0.44,YouTube,seamless casting,,multi-device
+dyn_3,Dynamic Persona 3,15.8,18-25,High,Tier-2,0.6,0.45,YouTube,seamless casting,,multi-device
