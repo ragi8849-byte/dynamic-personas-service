@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import pandas as pd, numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
@@ -42,6 +42,7 @@ class DynamicReq(BaseModel):
     k_min: int = 2  # Reduced from 3 for faster clustering
     k_max: int = 4  # Reduced from 6 for faster clustering
     min_cluster_pct: float = 0.03  # drop tiny clusters (<3% of subset)
+    show_sub_personas: bool = True  # Show hierarchical personas
 
 # ---------- Helpers ----------
 def parse_goal(goal: str) -> dict:
@@ -91,7 +92,57 @@ def choose_k(feats_sub: np.ndarray, k_min=2, k_max=4):
             best_k, best_score, best_model = k, sc, km
     return best_k, best_score, best_model
 
-def summarize_cluster(grp: pd.DataFrame):
+def generate_sub_personas(grp: pd.DataFrame, cluster_id: int) -> List[Dict]:
+    """Generate sub-personas within a cluster based on key traits"""
+    sub_personas = []
+    
+    # Define sub-persona filters based on key traits
+    sub_filters = [
+        {"name": "Urban Tech Enthusiasts", "filters": {"city_tier": ["Tier-1"], "device_count_min": 3}},
+        {"name": "Urban Tech Skeptics", "filters": {"city_tier": ["Tier-1"], "privacy_pref_min": 0.6}},
+        {"name": "Budget-Conscious Users", "filters": {"price_sensitivity_min": 0.6}},
+        {"name": "Brand-Aware Consumers", "filters": {"brand_awareness_bose_min": 0.7}},
+        {"name": "Privacy-Focused Users", "filters": {"privacy_pref_min": 0.7}},
+        {"name": "Multi-Device Users", "filters": {"device_count_min": 4}},
+    ]
+    
+    for sub_filter in sub_filters:
+        mask = np.ones(len(grp), dtype=bool)
+        filters = sub_filter["filters"]
+        
+        if "city_tier" in filters:
+            mask &= grp.city_tier.isin(filters["city_tier"]).values
+        if "device_count_min" in filters:
+            mask &= (grp.device_count >= filters["device_count_min"]).values
+        if "privacy_pref_min" in filters:
+            mask &= (grp.privacy_pref >= filters["privacy_pref_min"]).values
+        if "price_sensitivity_min" in filters:
+            mask &= (grp.price_sensitivity >= filters["price_sensitivity_min"]).values
+        if "brand_awareness_bose_min" in filters:
+            mask &= (grp.brand_awareness_bose >= filters["brand_awareness_bose_min"]).values
+            
+        sub_grp = grp[mask]
+        
+        if len(sub_grp) >= 10:  # Minimum size for sub-persona
+            sub_persona = {
+                "name": sub_filter["name"],
+                "size": len(sub_grp),
+                "size_pct": round(len(sub_grp)/len(grp)*100, 1),
+                "traits": {
+                    "avg_age": round(sub_grp["age"].mean(), 1),
+                    "avg_device_count": round(sub_grp["device_count"].mean(), 1),
+                    "avg_price_sensitivity": round(sub_grp["price_sensitivity"].mean(), 2),
+                    "avg_privacy_pref": round(sub_grp["privacy_pref"].mean(), 2),
+                    "avg_brand_awareness": round(sub_grp["brand_awareness_bose"].mean(), 2),
+                    "top_income": sub_grp["income_band"].mode().iloc[0] if not sub_grp["income_band"].mode().empty else "Unknown",
+                    "top_media": sub_grp["preferred_media"].mode().iloc[0] if not sub_grp["preferred_media"].mode().empty else "YouTube"
+                }
+            }
+            sub_personas.append(sub_persona)
+    
+    return sub_personas
+
+def summarize_cluster(grp: pd.DataFrame, show_sub_personas: bool = True):
     care_about, barriers, top_traits = set(), set(), []
     # Heuristics from synthetic signals
     if grp["brand_awareness_bose"].mean() > 0.65:
@@ -118,13 +169,20 @@ def summarize_cluster(grp: pd.DataFrame):
         "brand_awareness_bose": round(float(grp["brand_awareness_bose"].mean()), 2),
         "top_media": [top_media]
     }
-    return {
+    
+    result = {
         "care_about": sorted(list(care_about)),
         "barriers": sorted(list(barriers)),
         "top_traits": top_traits,
         "priors": priors,
         "demographics": demographics
     }
+    
+    # Add sub-personas if requested
+    if show_sub_personas:
+        result["sub_personas"] = generate_sub_personas(grp, 0)  # cluster_id will be set later
+    
+    return result
 
 # ---------- Routes ----------
 @app.get("/health")
@@ -153,11 +211,17 @@ def dynamic_personas(req: DynamicReq):
         if size_pct < (req.min_cluster_pct * 100):
             continue  # drop tiny clusters
         try:
-            s = summarize_cluster(grp)
+            s = summarize_cluster(grp, req.show_sub_personas)
+            # Update sub-personas with correct cluster_id
+            if req.show_sub_personas and "sub_personas" in s:
+                for sub_persona in s["sub_personas"]:
+                    sub_persona["cluster_id"] = int(cid)
+            
             personas.append({
                 "id": f"dyn_{int(cid)}",
                 "label": f"Dynamic Persona {int(cid)}",
                 "size_pct": size_pct,
+                "cluster_size": len(grp),
                 **s
             })
         except Exception as e:
@@ -167,11 +231,13 @@ def dynamic_personas(req: DynamicReq):
                 "id": f"dyn_{int(cid)}",
                 "label": f"Dynamic Persona {int(cid)} (Error)",
                 "size_pct": size_pct,
+                "cluster_size": len(grp),
                 "care_about": [],
                 "barriers": [f"summarization error: {e}"],
                 "top_traits": [],
                 "priors": {},
-                "demographics": {}
+                "demographics": {},
+                "sub_personas": []
             })
 
     personas = sorted(personas, key=lambda p: p["size_pct"], reverse=True)[:6]
