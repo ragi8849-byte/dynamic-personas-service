@@ -5,6 +5,11 @@ from typing import Optional, Dict
 import pandas as pd, numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ---------- App ----------
 app = FastAPI(title="Dynamic Persona Generator", version="0.1")
@@ -20,21 +25,22 @@ app.add_middleware(
 
 # ---------- Load data created in Step 1 ----------
 USERS = pd.read_parquet("data/users.parquet")
+FEATS = np.load("data/feats.npy")  # standardized feature matrix aligned to USERS rows
+
 # OPTIMIZATION: Use smaller sample for faster API responses
 SAMPLE_SIZE = 5000  # Much faster than 50K
 if len(USERS) > SAMPLE_SIZE:
-    print(f"Using sample of {SAMPLE_SIZE} users for faster API responses")
+    logger.info(f"Using sample of {SAMPLE_SIZE} users for faster API responses")
     sample_indices = np.random.choice(len(USERS), SAMPLE_SIZE, replace=False)
     USERS = USERS.iloc[sample_indices].reset_index(drop=True)
     FEATS = FEATS[sample_indices]
-FEATS = np.load("data/feats.npy")  # standardized feature matrix aligned to USERS rows
 
 # ---------- Models ----------
 class DynamicReq(BaseModel):
     goal: str
     filters: Optional[Dict] = None
-    k_min: int = 2
-    k_max: int = 4
+    k_min: int = 2  # Reduced from 3 for faster clustering
+    k_max: int = 4  # Reduced from 6 for faster clustering
     min_cluster_pct: float = 0.03  # drop tiny clusters (<3% of subset)
 
 # ---------- Helpers ----------
@@ -54,6 +60,8 @@ def parse_goal(goal: str) -> dict:
         f["privacy_pref_min"] = 0.6
     if "budget" in g or "price" in g:
         f["price_sensitivity_min"] = 0.55
+    if "bose" in g and "india" in g:
+        f["brand_awareness_bose_min"] = 0.65 # Example heuristic
     return f
 
 def apply_filters(users: pd.DataFrame, feats: np.ndarray, filters: dict):
@@ -69,9 +77,11 @@ def apply_filters(users: pd.DataFrame, feats: np.ndarray, filters: dict):
         mask &= (users.privacy_pref >= filters["privacy_pref_min"]).values
     if "price_sensitivity_min" in filters:
         mask &= (users.price_sensitivity >= filters["price_sensitivity_min"]).values
+    if "brand_awareness_bose_min" in filters:
+        mask &= (users.brand_awareness_bose >= filters["brand_awareness_bose_min"]).values
     return users[mask], feats[mask]
 
-def choose_k(feats_sub: np.ndarray, k_min=3, k_max=6):
+def choose_k(feats_sub: np.ndarray, k_min=2, k_max=4):
     best_k, best_score, best_model = None, -1, None
     for k in range(k_min, k_max + 1):
         km = KMeans(n_clusters=k, random_state=42, n_init="auto")
@@ -128,7 +138,7 @@ def dynamic_personas(req: DynamicReq):
 
     users_sub, feats_sub = apply_filters(USERS, FEATS, filters)
     n = len(users_sub)
-    if n < 500:
+    if n < 100:  # Reduced threshold for smaller dataset
         return {"personas": [], "meta": {"subset_n": n, "filters_applied": filters, "warning": "too few users"}}
 
     best_k, best_score, best_model = choose_k(feats_sub, req.k_min, req.k_max)
@@ -144,28 +154,25 @@ def dynamic_personas(req: DynamicReq):
             continue  # drop tiny clusters
         try:
             s = summarize_cluster(grp)
-        except Exception as e:  # defensive: never drop a cluster silently
-            s = {
+            personas.append({
+                "id": f"dyn_{int(cid)}",
+                "label": f"Dynamic Persona {int(cid)}",
+                "size_pct": size_pct,
+                **s
+            })
+        except Exception as e:
+            logger.error(f"Error summarizing cluster {cid}: {e}")
+            # Append a fallback persona with error info
+            personas.append({
+                "id": f"dyn_{int(cid)}",
+                "label": f"Dynamic Persona {int(cid)} (Error)",
+                "size_pct": size_pct,
                 "care_about": [],
-                "barriers": [],
+                "barriers": [f"summarization error: {e}"],
                 "top_traits": [],
-                "priors": {
-                    "emi_usage": round(float(grp["emi_flag"].mean()), 2),
-                    "brand_awareness_bose": round(float(grp["brand_awareness_bose"].mean()), 2),
-                    "top_media": [str(grp.get("preferred_media", pd.Series(["YouTube"])) .mode().iloc[0]) if not grp.get("preferred_media", pd.Series()).mode().empty else "YouTube"]
-                },
-                "demographics": {
-                    "age_range": f"{int(grp['age'].min())}-{int(grp['age'].max())}",
-                    "income_band": str(grp.get("income_band", pd.Series(["Mid"])) .mode().iloc[0]),
-                    "geo": str(grp.get("city_tier", pd.Series(["Tier-1"])) .mode().iloc[0])
-                }
-            }
-        personas.append({
-            "id": f"dyn_{int(cid)}",
-            "label": f"Dynamic Persona {int(cid)}",
-            "size_pct": size_pct,
-            **s
-        })
+                "priors": {},
+                "demographics": {}
+            })
 
     personas = sorted(personas, key=lambda p: p["size_pct"], reverse=True)[:6]
     return {"personas": personas, "meta": {
