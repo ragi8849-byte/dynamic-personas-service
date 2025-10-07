@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app and data generated in Step 1
+# Copy app, static files, and data generated in Step 1
 COPY app ./app
+COPY static ./static
 COPY data ./data
 
 EXPOSE 8080

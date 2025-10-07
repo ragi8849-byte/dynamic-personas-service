@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 import pandas as pd, numpy as np
@@ -7,6 +9,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 import logging
 import json
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +26,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve static files
+static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # ---------- Load data created in Step 1 ----------
 USERS = pd.read_parquet("data/users.parquet")
@@ -505,6 +513,14 @@ def generate_persona_chat_response(persona_traits: Dict, chat_personality: str, 
             return "Sounds interesting! Tell me more about what makes these headphones special and why I should consider them."
 
 # ---------- Routes ----------
+@app.get("/")
+def root():
+    """Serve the main web interface"""
+    static_file = os.path.join(static_dir, "index.html")
+    if os.path.exists(static_file):
+        return FileResponse(static_file)
+    return {"message": "Dynamic Persona Generator API", "docs": "/docs"}
+
 @app.get("/health")
 def health():
     return {"ok": True, "users": int(len(USERS))}
