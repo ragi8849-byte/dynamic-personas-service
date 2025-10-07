@@ -1,195 +1,243 @@
-# Dynamic Persona Generator
+# Dynamic Persona Generator API
 
-An AI-powered customer segmentation and persona chat system that uses machine learning clustering to generate detailed customer personas and enables interactive conversations with them.
+A FastAPI service that generates dynamic personas from business goals using machine learning clustering.
 
 ## Features
 
-- **Goal-Based Clustering**: Enter a business goal or target audience description and automatically generate relevant customer segments
-- **Dynamic Persona Generation**: Create detailed, data-driven personas from clustered user data
-- **Interactive Chat**: Chat with personas to understand their preferences, concerns, and behaviors
-- **Modern Web Interface**: Clean, responsive UI with step-by-step workflow
-
-## Architecture
-
-- **Backend**: FastAPI (Python) with scikit-learn for ML clustering
-- **Frontend**: Vanilla JavaScript with modern CSS
-- **Data**: Pre-generated user dataset with 5,000 sample users
-- **Clustering**: K-Means with silhouette scoring for optimal cluster selection
-
-## Getting Started
-
-### Option 1: Using Docker (Recommended)
-
-```bash
-# Build and run with Docker
-docker build -t persona-generator .
-docker run -p 8080:8080 persona-generator
-```
-
-Then open http://localhost:8080 in your browser.
-
-### Option 2: Using run.sh Script
-
-```bash
-# Make the script executable (first time only)
-chmod +x run.sh
-
-# Run the application
-./run.sh
-```
-
-The script will automatically use Docker if available, otherwise fallback to local Python.
-
-### Option 3: Local Python Development
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Then open http://localhost:8000 in your browser.
-
-## How to Use
-
-### Step 1: Define Your Goal
-Enter a business goal or target audience description. Examples:
-- "Increase Bose headphone adoption among college students in tier-2 cities"
-- "Target budget-conscious commuters who care about privacy"
-- "Reach tech enthusiasts in tier-1 cities"
-
-### Step 2: Select a Cluster
-Review the automatically generated customer segments. Each cluster shows:
-- Demographic profile
-- Key traits and characteristics
-- Size and percentage of audience
-- Cohesion score
-
-### Step 3: Choose a Persona
-Select a specific persona within the cluster. Each persona includes:
-- Name and demographics
-- What they care about
-- Key barriers to adoption
-- Media preferences
-- Behavioral score
-
-### Step 4: Chat with Persona
-Interact with the persona to understand:
-- Pricing concerns
-- Feature preferences
-- Privacy considerations
-- Tech savviness
-- Purchase barriers
+- **Goal-based clustering**: Generate user clusters from business goals
+- **Dynamic personas**: Create detailed personas with Indian names and demographics
+- **Rule-based chat**: Chat with personas using contextual responses
+- **Optimized performance**: Uses 5K user sample for fast responses
+- **RESTful API**: Clean endpoints for integration
 
 ## API Endpoints
 
-### `GET /`
-Serves the web interface
-
-### `GET /health`
-Health check endpoint
-```json
-{
-  "ok": true,
-  "users": 5000
-}
+### Health Check
+```bash
+GET /health
 ```
 
-### `POST /clusters/generate`
-Generate clusters from a goal
-```json
+### Generate Clusters
+```bash
+POST /clusters/generate
+Content-Type: application/json
+
 {
-  "goal": "college students in tier-2 cities",
+  "goal": "college students interested in headphones",
   "k_min": 2,
   "k_max": 4,
-  "detailed_personas": true
+  "min_cluster_pct": 0.03
 }
 ```
 
-### `POST /personas/{cluster_id}`
-Get personas for a specific cluster
+### Get Personas for Cluster
+```bash
+POST /personas/{cluster_id}
+Content-Type: application/json
 
-### `POST /personas/{persona_id}/chat`
-Chat with a specific persona
-
-## Project Structure
-
-```
-.
-├── app/
-│   ├── __init__.py
-│   └── main.py              # FastAPI application
-├── data/
-│   ├── users.parquet        # User dataset
-│   ├── feats.npy           # Feature matrix
-│   └── encoders.pkl        # Label encoders
-├── static/
-│   └── index.html          # Web interface
-├── scripts/
-│   └── generate_data.py    # Data generation script
-├── Dockerfile
-├── requirements.txt
-├── run.sh                  # Quick start script
-└── README.md
+{
+  "goal": "college students interested in headphones"
+}
 ```
 
-## Data Schema
+### Chat with Persona
+```bash
+POST /personas/{persona_id}/chat
+Content-Type: application/json
 
-The user dataset includes:
-- **Demographics**: age, city_tier, income_band
-- **Behavior**: device_count, purchase_intent, emi_flag
-- **Preferences**: privacy_pref, price_sensitivity, preferred_media
-- **Brand Awareness**: brand_awareness_bose
+{
+  "cluster_id": 1,
+  "persona_id": "dyn_1_0",
+  "message": "What do you think about Bose headphones?",
+  "conversation_history": []
+}
+```
 
-## Technologies
+### Legacy Endpoint
+```bash
+POST /personas/dynamic
+Content-Type: application/json
 
-- **FastAPI**: Modern Python web framework
-- **scikit-learn**: Machine learning clustering
-- **pandas/numpy**: Data manipulation
-- **uvicorn**: ASGI server
-- **Docker**: Containerization
+{
+  "goal": "college students interested in headphones"
+}
+```
 
-## Development
+## Response Format
 
-### Adding New Features
+### Cluster Response
+```json
+{
+  "clusters": [
+    {
+      "cluster_id": 1,
+      "cluster_label": "Tech Adopters • Tier-1 • Value Conscious",
+      "cluster_size": 390,
+      "cluster_size_pct": 37.2,
+      "cluster_description": "This cluster represents mid income users in Tier-1 cities...",
+      "top_traits": ["High YouTube Usage"],
+      "representative_icon": "🧑‍💻 💰 📱",
+      "engagement_score": "Cohesion 0.12 • Low Separation",
+      "demographics_summary": "18-25 years • Mid income • Tier-1 cities",
+      "personas_count": 3
+    }
+  ],
+  "meta": {
+    "subset_n": 1048,
+    "k": 4,
+    "silhouette": 0.122,
+    "filters_applied": {"age_range": [18, 25]}
+  }
+}
+```
 
-1. Modify `app/main.py` for backend changes
-2. Update `static/index.html` for frontend changes
-3. Regenerate data if needed using `scripts/generate_data.py`
+### Persona Response
+```json
+{
+  "personas": [
+    {
+      "persona_id": "dyn_1_0",
+      "persona_name": "Priya Patel — Young Tech Adopter",
+      "demographics": "18-24 • ₹25-50K • Tier 1 city",
+      "care_about_top2": ["Seamless device integration", "Video content quality"],
+      "barriers_top1": "Uncertainty about product quality",
+      "media_preference": "YouTube, Instagram",
+      "cluster_linkage": "Cluster #1 — Tech Adopters",
+      "behavioral_score": "0.58 (Low relevance)",
+      "personality_traits": {
+        "age_group": "21 years old",
+        "tech_savviness": "Medium",
+        "price_sensitivity": "Medium",
+        "brand_awareness": "Medium",
+        "privacy_consciousness": "Low",
+        "city_tier": "Tier-1",
+        "income_level": "Mid",
+        "preferred_media": "YouTube",
+        "device_count": "3.0 devices",
+        "emi_usage_likelihood": "44.4%"
+      },
+      "chat_personality": "You are a 21-year-old from a Tier-1 city..."
+    }
+  ],
+  "cluster_info": {
+    "cluster_id": 1,
+    "cluster_size": 390,
+    "cluster_label": "Cluster #1"
+  }
+}
+```
 
-### Customizing Personas
+### Chat Response
+```json
+{
+  "persona_id": "dyn_1_0",
+  "response": "Sounds interesting! Tell me more about what makes these headphones special and why I should consider them.",
+  "persona_traits": {
+    "age_group": "21 years old",
+    "tech_savviness": "Medium",
+    "price_sensitivity": "Medium",
+    "brand_awareness": "Medium",
+    "privacy_consciousness": "Low",
+    "city_tier": "Tier-1",
+    "income_level": "Mid",
+    "preferred_media": "YouTube",
+    "device_count": "3.0 devices",
+    "emi_usage_likelihood": "44.4%"
+  },
+  "conversation_history": [
+    {"role": "user", "message": "What do you think about Bose headphones?"},
+    {"role": "persona", "message": "Sounds interesting! Tell me more..."}
+  ]
+}
+```
 
-Edit the persona generation functions in `app/main.py`:
-- `generate_persona_name()`
-- `generate_demographics_string()`
-- `generate_personality_traits()`
-- `generate_chat_personality()`
+## Local Development
 
-### Modifying Clustering
+### Setup
+```bash
+# Clone repository
+git clone <repository-url>
+cd synthetic-personas/dyn-service
 
-Adjust clustering parameters in the API request:
-- `k_min`: Minimum number of clusters
-- `k_max`: Maximum number of clusters
-- `min_cluster_pct`: Minimum cluster size percentage
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Generate data
+cd scripts
+python generate_data.py
+cd ..
+
+# Run API
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Test API
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Generate clusters
+curl -X POST http://localhost:8000/clusters/generate \
+  -H "Content-Type: application/json" \
+  -d '{"goal": "college students"}'
+
+# Chat with persona
+curl -X POST http://localhost:8000/personas/dyn_1_0/chat \
+  -H "Content-Type: application/json" \
+  -d '{"cluster_id": 1, "persona_id": "dyn_1_0", "message": "Hello!"}'
+```
+
+## Docker Deployment
+
+### Build and Run
+```bash
+# Build image
+docker build -t dynamic-personas .
+
+# Run container
+docker run -p 8080:8080 dynamic-personas
+```
+
+### Test Docker
+```bash
+curl http://localhost:8080/health
+```
+
+## Production Deployment
+
+The API is deployed on Google Cloud Run:
+- **URL**: `https://dyn-personas-656907085987.asia-south1.run.app`
+- **Health**: `https://dyn-personas-656907085987.asia-south1.run.app/health`
+
+## Chat System
+
+The chat system uses **rule-based responses** based on:
+- Keywords in messages (`price`, `quality`, `tech`, `privacy`)
+- Persona traits (price sensitivity, tech savviness, brand awareness)
+- Pre-written contextual responses
+
+### Example Chat Flow
+1. User: "What about the price?"
+2. Persona: "Honestly, price is a big concern for me. I need to know about EMI options..."
+
+## Data
+
+- **Dataset**: 5,000 synthetic users (sampled from 50,000)
+- **Features**: Age, income, city tier, media preferences, device usage, etc.
+- **Clustering**: K-means with silhouette score optimization
+- **Personas**: 2-3 personas per cluster with detailed traits
 
 ## Performance
 
-- Uses optimized 5,000 user sample for fast responses
-- Clustering typically completes in < 2 seconds
-- Persona generation is near-instantaneous
-- Chat responses use rule-based system (can be upgraded to LLM)
-
-## Future Enhancements
-
-- [ ] Integration with actual LLM for more natural conversations
-- [ ] Real-time data updates from production systems
-- [ ] Export personas to PDF/CSV
-- [ ] Multi-language support
-- [ ] A/B testing framework
-- [ ] Advanced visualization and analytics
+- **Response time**: < 30 seconds for cluster generation
+- **Chat response**: Instant (rule-based)
+- **Memory usage**: Optimized for 5K users
+- **Scalability**: Ready for horizontal scaling
 
 ## License
 
-This project is for demonstration purposes.
+MIT License
