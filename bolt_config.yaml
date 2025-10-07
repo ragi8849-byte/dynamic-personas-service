@@ -1,0 +1,163 @@
+# Bolt AI Configuration for Dynamic Persona Generator
+# Place this in your Bolt AI project configuration
+
+bolt:
+  version: "1.0"
+  name: "Dynamic Persona Generator Integration"
+  description: "Integrate with Dynamic Persona Generator API for persona-based conversations"
+
+# API Configuration
+api:
+  persona_generator:
+    base_url: "https://dyn-personas-656907085987.asia-south1.run.app"
+    timeout: 30
+    retry_attempts: 3
+    endpoints:
+      health: "/health"
+      clusters: "/clusters/generate"
+      personas: "/personas/{cluster_id}"
+      chat: "/personas/{persona_id}/chat"
+
+# Integration Settings
+integrations:
+  persona_generator:
+    enabled: true
+    auto_generate_personas: true
+    max_personas_per_cluster: 3
+    conversation_memory: true
+    persona_traits_for_llm: true
+
+# Commands Configuration
+commands:
+  generate_personas:
+    description: "Generate personas for a business goal"
+    parameters:
+      goal:
+        type: string
+        required: true
+        description: "Business goal or target audience description"
+        example: "increase bose headphone adoption among college students"
+    handler: "persona_generator.generatePersonas"
+    response_format: "structured"
+    
+  chat_persona:
+    description: "Chat with a specific persona"
+    parameters:
+      persona_id:
+        type: string
+        required: true
+        description: "Persona ID to chat with"
+        example: "dyn_1_0"
+      message:
+        type: string
+        required: true
+        description: "Message to send to the persona"
+        example: "What do you think about Bose headphones?"
+    handler: "persona_generator.chatPersona"
+    response_format: "conversational"
+    
+  get_persona_traits:
+    description: "Get persona traits for LLM consumption"
+    parameters:
+      persona_id:
+        type: string
+        required: true
+        description: "Persona ID to get traits for"
+    handler: "persona_generator.getPersonaTraits"
+    response_format: "structured"
+
+# UI Configuration
+ui:
+  persona_cards:
+    enabled: true
+    show_demographics: true
+    show_traits: true
+    show_behavioral_score: true
+    show_cluster_linkage: true
+  
+  cluster_cards:
+    enabled: true
+    show_size_percentage: true
+    show_user_count: true
+    show_traits: true
+    show_description: true
+  
+  chat_interface:
+    enabled: true
+    show_persona_name: true
+    show_persona_traits: true
+    maintain_conversation_history: true
+    max_history_length: 50
+
+# Workflow Configuration
+workflows:
+  persona_exploration:
+    steps:
+      - name: "goal_input"
+        type: "user_input"
+        prompt: "What's your business goal?"
+        required: true
+      
+      - name: "generate_clusters"
+        type: "api_call"
+        endpoint: "clusters"
+        parameters: ["goal"]
+      
+      - name: "display_clusters"
+        type: "ui_render"
+        component: "cluster_cards"
+        data_source: "generate_clusters"
+      
+      - name: "select_cluster"
+        type: "user_selection"
+        prompt: "Select a cluster to explore personas"
+        options_source: "generate_clusters.clusters"
+      
+      - name: "generate_personas"
+        type: "api_call"
+        endpoint: "personas"
+        parameters: ["selected_cluster_id", "goal"]
+      
+      - name: "display_personas"
+        type: "ui_render"
+        component: "persona_cards"
+        data_source: "generate_personas"
+      
+      - name: "select_persona"
+        type: "user_selection"
+        prompt: "Select a persona to chat with"
+        options_source: "generate_personas.personas"
+      
+      - name: "start_chat"
+        type: "ui_render"
+        component: "chat_interface"
+        data_source: "selected_persona"
+
+# Error Handling
+error_handling:
+  api_timeout: "retry_with_backoff"
+  api_failure: "show_error_message"
+  invalid_input: "show_validation_error"
+  no_results: "show_no_results_message"
+
+# Logging Configuration
+logging:
+  level: "info"
+  log_api_calls: true
+  log_persona_interactions: true
+  log_errors: true
+
+# Security Configuration
+security:
+  api_key_required: false
+  rate_limiting: true
+  max_requests_per_minute: 60
+  cors_enabled: true
+  allowed_origins: ["*"]
+
+# Performance Configuration
+performance:
+  cache_personas: true
+  cache_duration: 300  # 5 minutes
+  parallel_api_calls: true
+  max_concurrent_requests: 10
