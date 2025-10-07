@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Persona Generator - Quick Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-box {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2a5298;
+        }
+        button {
+            background: #2a5298;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #1e3c72;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #2a5298;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-box">
+        <h1>🎯 API Connection Test</h1>
+        <p>Testing connection to: <strong>https://dyn-personas-656907085987.asia-south1.run.app</strong></p>
+
+        <button onclick="testHealth()">Test Health Endpoint</button>
+        <button onclick="testClusters()">Test Cluster Generation</button>
+        <button onclick="openFullInterface()">Open Full Interface</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://dyn-personas-656907085987.asia-south1.run.app';
+
+        function showResult(message, isError = false) {
+            const result = document.getElementById('result');
+            result.className = isError ? 'error' : 'success';
+            result.textContent = message;
+        }
+
+        async function testHealth() {
+            showResult('Testing health endpoint...');
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                showResult('✅ Health Check Passed!\n\n' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('❌ Health Check Failed!\n\n' + error.message, true);
+            }
+        }
+
+        async function testClusters() {
+            showResult('Generating clusters... (this may take a few seconds)');
+            try {
+                const response = await fetch(`${API_BASE}/clusters/generate`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        goal: 'college students in tier-2 cities',
+                        k_min: 2,
+                        k_max: 3
+                    })
+                });
+                const data = await response.json();
+                showResult('✅ Cluster Generation Successful!\n\n' +
+                    `Found ${data.clusters.length} clusters from ${data.meta.subset_n} users\n\n` +
+                    JSON.stringify(data.clusters[0], null, 2));
+            } catch (error) {
+                showResult('❌ Cluster Generation Failed!\n\n' + error.message, true);
+            }
+        }
+
+        function openFullInterface() {
+            window.open('standalone.html', '_blank');
+        }
+    </script>
+</body>
+</html>
