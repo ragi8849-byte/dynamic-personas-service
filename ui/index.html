@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Persona Explorer</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; margin-bottom: 40px; color: white; }
+        .header h1 { font-size: 2.5rem; margin-bottom: 10px; font-weight: 700; }
+        .header p { font-size: 1.2rem; opacity: 0.9; }
+        .flow-container { background: white; border-radius: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden; min-height: 600px; }
+        .flow-step { padding: 40px; display: none; }
+        .flow-step.active { display: block; }
+        .step-indicator { display: flex; justify-content: center; padding: 20px; background: #f8f9fa; border-bottom: 1px solid #e9ecef; }
+        .step { display: flex; align-items: center; margin: 0 20px; color: #6c757d; font-weight: 500; }
+        .step.active { color: #667eea; }
+        .step.completed { color: #28a745; }
+        .step-number { width: 30px; height: 30px; border-radius: 50%; background: #e9ecef; display: flex; align-items: center; justify-content: center; margin-right: 10px; font-weight: bold; }
+        .step.active .step-number { background: #667eea; color: white; }
+        .step.completed .step-number { background: #28a745; color: white; }
+        .step-line { width: 50px; height: 2px; background: #e9ecef; margin: 0 10px; }
+        .step.completed + .step-line { background: #28a745; }
+        .goal-input { text-align: center; }
+        .goal-input h2 { font-size: 2rem; margin-bottom: 20px; color: #333; }
+        .goal-input p { font-size: 1.1rem; color: #6c757d; margin-bottom: 30px; }
+        .input-group { max-width: 600px; margin: 0 auto 30px; }
+        .input-group textarea { width: 100%; padding: 20px; border: 2px solid #e9ecef; border-radius: 15px; font-size: 1.1rem; resize: vertical; min-height: 120px; transition: border-color 0.3s; }
+        .input-group textarea:focus { outline: none; border-color: #667eea; }
+        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 15px 30px; border-radius: 50px; font-size: 1.1rem; font-weight: 600; cursor: pointer; transition: transform 0.2s; }
+        .btn:hover { transform: translateY(-2px); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .loading { display: flex; align-items: center; justify-content: center; gap: 10px; color: #667eea; }
+        .spinner { width: 20px; height: 20px; border: 2px solid #e9ecef; border-top: 2px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .clusters-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 30px; }
+        .cluster-card { background: white; border: 2px solid #e9ecef; border-radius: 15px; padding: 25px; cursor: pointer; transition: all 0.3s; position: relative; overflow: hidden; }
+        .cluster-card:hover { border-color: #667eea; transform: translateY(-5px); box-shadow: 0 10px 25px rgba(102, 126, 234, 0.15); }
+        .cluster-header { display: flex; align-items: center; margin-bottom: 15px; }
+        .cluster-icon { width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem; margin-right: 15px; }
+        .cluster-info h3 { font-size: 1.3rem; margin-bottom: 5px; color: #333; }
+        .cluster-size { color: #6c757d; font-size: 0.9rem; }
+        .cluster-traits { margin: 15px 0; }
+        .trait-tag { display: inline-block; background: #f8f9fa; color: #495057; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem; margin: 3px; }
+        .cluster-score { position: absolute; top: 15px; right: 15px; background: #28a745; color: white; padding: 5px 10px; border-radius: 15px; font-size: 0.8rem; font-weight: 600; }
+        .personas-container { max-width: 800px; margin: 0 auto; }
+        .persona-card { background: white; border: 2px solid #e9ecef; border-radius: 15px; padding: 25px; margin-bottom: 20px; cursor: pointer; transition: all 0.3s; }
+        .persona-card:hover { border-color: #667eea; box-shadow: 0 5px 15px rgba(102, 126, 234, 0.1); }
+        .persona-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .persona-name { font-size: 1.4rem; font-weight: 600; color: #333; }
+        .persona-score { background: #667eea; color: white; padding: 8px 15px; border-radius: 20px; font-size: 0.9rem; font-weight: 600; }
+        .persona-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .detail-section h4 { color: #495057; margin-bottom: 10px; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .detail-section p { color: #6c757d; line-height: 1.5; }
+        .care-barriers { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .care-item, .barrier-item { background: #f8f9fa; padding: 10px 15px; border-radius: 8px; margin: 5px 0; font-size: 0.9rem; }
+        .care-item { border-left: 4px solid #28a745; }
+        .barrier-item { border-left: 4px solid #dc3545; }
+        .chat-container { max-width: 800px; margin: 0 auto; height: 500px; display: flex; flex-direction: column; }
+        .chat-header { background: #667eea; color: white; padding: 20px; border-radius: 15px 15px 0 0; text-align: center; }
+        .chat-messages { flex: 1; background: #f8f9fa; padding: 20px; overflow-y: auto; border-left: 1px solid #e9ecef; border-right: 1px solid #e9ecef; }
+        .message { margin-bottom: 15px; display: flex; align-items: flex-start; }
+        .message.user { justify-content: flex-end; }
+        .message-content { max-width: 70%; padding: 12px 18px; border-radius: 18px; font-size: 0.95rem; line-height: 1.4; }
+        .message.user .message-content { background: #667eea; color: white; border-bottom-right-radius: 5px; }
+        .message.persona .message-content { background: white; color: #333; border: 1px solid #e9ecef; border-bottom-left-radius: 5px; }
+        .chat-input { display: flex; padding: 20px; background: white; border-radius: 0 0 15px 15px; border: 1px solid #e9ecef; border-top: none; }
+        .chat-input input { flex: 1; padding: 12px 18px; border: 1px solid #e9ecef; border-radius: 25px; font-size: 1rem; margin-right: 10px; }
+        .chat-input input:focus { outline: none; border-color: #667eea; }
+        .chat-input button { background: #667eea; color: white; border: none; padding: 12px 20px; border-radius: 25px; cursor: pointer; font-size: 1rem; }
+        .back-btn { background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 25px; cursor: pointer; margin-bottom: 20px; }
+        .error-message { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #f5c6cb; }
+        @media (max-width: 768px) { .container { padding: 10px; } .header h1 { font-size: 2rem; } .flow-step { padding: 20px; } .clusters-grid { grid-template-columns: 1fr; } .persona-details { grid-template-columns: 1fr; } .care-barriers { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState } = React;
+        const API_BASE_URL = 'https://dyn-personas-656907085987.asia-south1.run.app';
+        
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [goal, setGoal] = useState('');
+            const [clusters, setClusters] = useState([]);
+            const [selectedCluster, setSelectedCluster] = useState(null);
+            const [personas, setPersonas] = useState([]);
+            const [selectedPersona, setSelectedPersona] = useState(null);
+            const [chatHistory, setChatHistory] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+
+            const steps = [
+                { id: 0, title: 'Goal', icon: '🎯' },
+                { id: 1, title: 'Clusters', icon: '📊' },
+                { id: 2, title: 'Personas', icon: '👥' },
+                { id: 3, title: 'Chat', icon: '💬' }
+            ];
+
+            const handleGoalSubmit = async () => {
+                if (!goal.trim()) return;
+                setLoading(true);
+                setError(null);
+                try {
+                    const response = await axios.post(`${API_BASE_URL}/clusters/generate`, {
+                        goal: goal, k_min: 2, k_max: 4, min_cluster_pct: 0.03
+                    });
+                    setClusters(response.data.clusters || []);
+                    setCurrentStep(1);
+                } catch (err) {
+                    setError('Failed to generate clusters. Please try again.');
+                    console.error('Error:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleClusterSelect = async (cluster) => {
+                setSelectedCluster(cluster);
+                setLoading(true);
+                setError(null);
+                try {
+                    const response = await axios.post(`${API_BASE_URL}/personas/${cluster.id}`, {
+                        goal: goal, k_min: 2, k_max: 4, min_cluster_pct: 0.03
+                    });
+                    setPersonas(response.data.personas || []);
+                    setCurrentStep(2);
+                } catch (err) {
+                    setError('Failed to load personas. Please try again.');
+                    console.error('Error:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handlePersonaSelect = (persona) => {
+                setSelectedPersona(persona);
+                setChatHistory([]);
+                setCurrentStep(3);
+            };
+
+            const handleChatSend = async (message) => {
+                if (!message.trim() || !selectedPersona) return;
+                const newMessage = { role: 'user', message: message };
+                const updatedHistory = [...chatHistory, newMessage];
+                setChatHistory(updatedHistory);
+                try {
+                    const response = await axios.post(`${API_BASE_URL}/personas/${selectedPersona.id}/chat`, {
+                        cluster_id: selectedCluster.id,
+                        persona_id: selectedPersona.id,
+                        message: message,
+                        conversation_history: updatedHistory
+                    });
+                    const personaResponse = { 
+                        role: 'persona', 
+                        message: response.data.response,
+                        persona_name: response.data.persona_name
+                    };
+                    setChatHistory([...updatedHistory, personaResponse]);
+                } catch (err) {
+                    setError('Failed to send message. Please try again.');
+                    console.error('Error:', err);
+                }
+            };
+
+            const goBack = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(currentStep - 1);
+                    setError(null);
+                }
+            };
+
+            return (
+                <div className="container">
+                    <div className="header">
+                        <h1><i className="fas fa-brain"></i> AI Persona Explorer</h1>
+                        <p>Discover your ideal customers through intelligent persona analysis</p>
+                    </div>
+                    <div className="flow-container">
+                        <div className="step-indicator">
+                            {steps.map((step, index) => (
+                                <React.Fragment key={step.id}>
+                                    <div className={`step ${currentStep === step.id ? 'active' : currentStep > step.id ? 'completed' : ''}`}>
+                                        <div className="step-number">
+                                            {currentStep > step.id ? <i className="fas fa-check"></i> : step.id + 1}
+                                        </div>
+                                        <span>{step.title}</span>
+                                    </div>
+                                    {index < steps.length - 1 && <div className="step-line"></div>}
+                                </React.Fragment>
+                            ))}
+                        </div>
+                        {error && (
+                            <div className="error-message">
+                                <i className="fas fa-exclamation-triangle"></i> {error}
+                            </div>
+                        )}
+                        <div className={`flow-step ${currentStep === 0 ? 'active' : ''}`}>
+                            <div className="goal-input">
+                                <h2>What's your marketing goal?</h2>
+                                <p>Describe your target audience or marketing objective</p>
+                                <div className="input-group">
+                                    <textarea
+                                        value={goal}
+                                        onChange={(e) => setGoal(e.target.value)}
+                                        placeholder="e.g., Increase AI headphone adoption among fitness enthusiasts, Target Gen Z moms for sustainable products..."
+                                        disabled={loading}
+                                    />
+                                </div>
+                                <button 
+                                    className="btn" 
+                                    onClick={handleGoalSubmit}
+                                    disabled={loading || !goal.trim()}
+                                >
+                                    {loading ? (
+                                        <div className="loading">
+                                            <div className="spinner"></div>
+                                            Analyzing...
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <i className="fas fa-search"></i> Analyze Goal
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                        <div className={`flow-step ${currentStep === 1 ? 'active' : ''}`}>
+                            <button className="back-btn" onClick={goBack}>
+                                <i className="fas fa-arrow-left"></i> Back to Goal
+                            </button>
+                            <h2>Customer Clusters</h2>
+                            <p>Click on a cluster to explore detailed personas</p>
+                            <div className="clusters-grid">
+                                {clusters.map((cluster, index) => (
+                                    <div 
+                                        key={cluster.id} 
+                                        className="cluster-card"
+                                        onClick={() => handleClusterSelect(cluster)}
+                                    >
+                                        <div className="cluster-score">
+                                            {cluster.engagement_score_str || 'High'}
+                                        </div>
+                                        <div className="cluster-header">
+                                            <div className="cluster-icon">
+                                                {cluster.representative_icon || '👥'}
+                                            </div>
+                                            <div className="cluster-info">
+                                                <h3>{cluster.cluster_label || `Cluster ${cluster.id}`}</h3>
+                                                <div className="cluster-size">
+                                                    {cluster.cluster_size_str || `${cluster.size_pct}% of audience`}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="cluster-traits">
+                                            {(cluster.top_traits_str || cluster.top_traits || []).map((trait, i) => (
+                                                <span key={i} className="trait-tag">{trait}</span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className={`flow-step ${currentStep === 2 ? 'active' : ''}`}>
+                            <button className="back-btn" onClick={goBack}>
+                                <i className="fas fa-arrow-left"></i> Back to Clusters
+                            </button>
+                            <h2>Detailed Personas</h2>
+                            <p>Select a persona to start chatting and understand their perspective</p>
+                            <div className="personas-container">
+                                {personas.map((persona, index) => (
+                                    <div 
+                                        key={persona.id} 
+                                        className="persona-card"
+                                        onClick={() => handlePersonaSelect(persona)}
+                                    >
+                                        <div className="persona-header">
+                                            <div className="persona-name">
+                                                {persona.detailed_persona?.persona_name || persona.label || `Persona ${persona.id}`}
+                                            </div>
+                                            <div className="persona-score">
+                                                {persona.detailed_persona?.behavioral_score || '0.75'}
+                                            </div>
+                                        </div>
+                                        <div className="persona-details">
+                                            <div className="detail-section">
+                                                <h4>Demographics</h4>
+                                                <p>{persona.detailed_persona?.demographics || persona.demographics?.age_range || 'N/A'}</p>
+                                            </div>
+                                            <div className="detail-section">
+                                                <h4>Media Preference</h4>
+                                                <p>{persona.detailed_persona?.media_preference || persona.priors?.top_media || 'N/A'}</p>
+                                            </div>
+                                            <div className="detail-section">
+                                                <h4>Cluster Linkage</h4>
+                                                <p>{persona.detailed_persona?.cluster_linkage || `Cluster ${selectedCluster?.id}`}</p>
+                                            </div>
+                                        </div>
+                                        <div className="care-barriers">
+                                            <div>
+                                                <h4>Care About</h4>
+                                                {(persona.detailed_persona?.care_about_top2 || persona.care_about || []).map((item, i) => (
+                                                    <div key={i} className="care-item">{item}</div>
+                                                ))}
+                                            </div>
+                                            <div>
+                                                <h4>Barriers</h4>
+                                                {(persona.detailed_persona?.barriers_top1 || persona.barriers || []).map((item, i) => (
+                                                    <div key={i} className="barrier-item">{item}</div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className={`flow-step ${currentStep === 3 ? 'active' : ''}`}>
+                            <button className="back-btn" onClick={goBack}>
+                                <i className="fas fa-arrow-left"></i> Back to Personas
+                            </button>
+                            <div className="chat-container">
+                                <div className="chat-header">
+                                    <h3>
+                                        <i className="fas fa-comments"></i> Chatting with {selectedPersona?.detailed_persona?.persona_name || selectedPersona?.label}
+                                    </h3>
+                                    <p>Ask questions to understand their perspective and preferences</p>
+                                </div>
+                                <div className="chat-messages">
+                                    {chatHistory.length === 0 ? (
+                                        <div style={{ textAlign: 'center', color: '#6c757d', padding: '40px' }}>
+                                            <i className="fas fa-comment-dots" style={{ fontSize: '3rem', marginBottom: '20px' }}></i>
+                                            <p>Start the conversation! Ask about their preferences, concerns, or needs.</p>
+                                        </div>
+                                    ) : (
+                                        chatHistory.map((msg, index) => (
+                                            <div key={index} className={`message ${msg.role}`}>
+                                                <div className="message-content">
+                                                    {msg.message}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                                <ChatInput onSend={handleChatSend} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function ChatInput({ onSend }) {
+            const [message, setMessage] = useState('');
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (message.trim()) {
+                    onSend(message);
+                    setMessage('');
+                }
+            };
+            return (
+                <form className="chat-input" onSubmit={handleSubmit}>
+                    <input
+                        type="text"
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        placeholder="Type your message..."
+                        autoFocus
+                    />
+                    <button type="submit">
+                        <i className="fas fa-paper-plane"></i>
+                    </button>
+                </form>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
